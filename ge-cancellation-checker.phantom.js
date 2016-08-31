@@ -8,6 +8,8 @@ var fs = require('fs');
 var VERBOSE = false;
 var loadInProgress = false;
 
+var data = {};
+
 // Calculate path of this file
 var PWD = '';
 var current_path_arr = system.args[0].split('/');
@@ -57,15 +59,19 @@ page.onError = function(msg, trace) {
 page.onCallback = function(query, msg) {
     if (query == 'username') { return settings.username; }
     if (query == 'password') { return settings.password; }
+    if (query == 'currentDate') { return settings.current_interview_date_str; }
+    if (query == 'earliestDate') { return data.earliestDate; }
+    if (query == 'setEarliestDate') { data.earliestDate = msg; return data.earliestDate;}
+    if (query == 'log') { console.log(msg); return; }
     if (query == 'fireClick') {
         return function() { return fireClick; } // @todo:david DON'T KNOW WHY THIS DOESN'T WORK! :( Just returns [Object object])
     }
     if (query == 'report-interview-time') {
         if (VERBOSE) { console.log('Next available appointment is at: ' + msg); }
         else { console.log(msg); }
-        return;  
+        return;
     }
-    if (query == 'report-no-interviews') {                                                                                                                                                  
+    if (query == 'report-no-interviews') {
         if (VERBOSE) { console.log('No new interviews available. Please try again later.'); }
         else { console.log('None'); }
         return;
@@ -89,7 +95,7 @@ var steps = [
             console.log('On GOES login page...');
             document.querySelector('input[name=j_username]').value = window.callPhantom('username');
 
-            /* The GE Login page limits passwords to only 12 characters, but phantomjs can get around 
+            /* The GE Login page limits passwords to only 12 characters, but phantomjs can get around
                this limitation, which causes the fatal error "Unable to find terms acceptance button" */
             document.querySelector('input[name=j_password]').value = window.callPhantom('password').substring(0,12);
             document.querySelector('form[action=j_security_check]').submit();
@@ -98,9 +104,9 @@ var steps = [
     },
     function() { // Accept terms
         page.evaluate(function() {
-            
+
 	    submitHome();
-	    
+
             console.log('Bypassing human check...');
         });
     },
@@ -112,7 +118,7 @@ var steps = [
                 ev.initEvent("click", true, true);
                 el.dispatchEvent(ev);
             }
-            
+
             var $manageAptBtn = document.querySelector('.bluebutton[name=manageAptm]');
             if (!$manageAptBtn) {
                 return window.callPhantom('fatal-error', 'Unable to find Manage Appointment button');
@@ -130,9 +136,9 @@ var steps = [
                 ev.initEvent("click", true, true);
                 el.dispatchEvent(ev);
             }
-            
+
             var $rescheduleBtn = document.querySelector('input[name=reschedule]');
-    
+
             if (!$rescheduleBtn) {
                 return window.callPhantom('fatal-error', 'Unable to find reschedule button. Is it after or less than 24 hrs before your appointment?');
             }
@@ -160,6 +166,11 @@ var steps = [
     function() {
 
         page.evaluate(function() {
+            function fireClick(el) {
+                var ev = document.createEvent("MouseEvents");
+                ev.initEvent("click", true, true);
+                el.dispatchEvent(ev);
+            }
 
             // If there are no more appointments available at all, there will be a message saying so.
             try {
@@ -174,9 +185,40 @@ var steps = [
             var month_year = document.querySelector('.date table tr:last-child td:last-child div').innerHTML;
 
             var full_date = month_year.replace(',', ' ' + date + ',');
-            // console.log('');
-            window.callPhantom('report-interview-time', full_date)
-            // console.log('The next available appointment is on ' + full_date + '.');
+            window.callPhantom('setEarliestDate', full_date)
+            var earliest = document.querySelector('.schedule-detailed table a.entry')
+            fireClick(earliest)
+        });
+    },
+    function() {
+
+        page.evaluate(function() {
+          console.log('evaluated last page')
+            function fireClick(el) {
+                var ev = document.createEvent("MouseEvents");
+                ev.initEvent("click", true, true);
+                el.dispatchEvent(ev);
+            }
+
+            // Set reason
+            document.querySelector('input[name=comments]').value = 'earlier date';
+            var confirm = document.querySelector('input[name=Confirm]');
+            var current = document.querySelectorAll('.maincontainer p')[5].innerHTML
+            current = /\<\/strong\>(.+)/.exec(current)[1]
+            current = new Date(current)
+            var earliest = new Date(window.callPhantom('earliestDate'));
+            var msg;
+
+            if (earliest < current) {
+              msg = 'Earliest appointment, ' + earliest.toDateString() + ', is sooner than current appointment, ' + current.toDateString() + '.';
+              msg = msg + ' Attempting to confirm this date.';
+              fireClick(confirm)
+            } else {
+              msg = 'Earliest appointment, ' + earliest.toDateString() + ', occurs after the current appointment, ' + current.toDateString() + '.';
+              msg = msg + ' Aborting...';
+            }
+
+            window.callPhantom('report-interview-time', earliest.toLocaleDateString())
         });
     }
 ];
